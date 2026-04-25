@@ -18,6 +18,7 @@
 
 use crate::spawn::{SysError, syscall_ret};
 use libc::sigset_t;
+use std::os::unix::io::AsRawFd;
 
 /// Probe whether a filesystem path is accessible and exists.
 ///
@@ -52,6 +53,56 @@ pub fn path_lstat_exists(path: &str) -> bool {
 /// OS boundary layer where blocking I/O on pseudo-files is acceptable.
 pub fn read_to_string(path: &str) -> Result<String, std::io::Error> {
     std::fs::read_to_string(path)
+}
+
+/// Advise the kernel to begin reading file data into the page cache.
+///
+/// This is an advisory hint only. It can help warm likely-needed file ranges,
+/// but the kernel may ignore the request, perform only part of it, or return
+/// before the data is fully resident in memory.
+///
+/// The `offset` and `len` identify the byte range to prefetch for `fd`.
+/// Success means the kernel accepted the request, not that subsequent reads are
+/// guaranteed to be cache hits.
+pub fn readahead(fd: impl AsRawFd, offset: u64, len: usize) -> Result<(), SysError> {
+    readahead_raw(fd.as_raw_fd(), offset, len)
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn readahead_raw(fd: libc::c_int, offset: u64, len: usize) -> Result<(), SysError> {
+    if offset > i64::MAX as u64 {
+        return Err(SysError::sys(libc::EINVAL, "readahead"));
+    }
+
+    let ret =
+        unsafe { libc::syscall(readahead_syscall_number(), fd, offset as libc::off64_t, len) };
+
+    if ret == -1 {
+        let code = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+        Err(SysError::sys(code, "readahead"))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+fn readahead_raw(_fd: libc::c_int, _offset: u64, _len: usize) -> Result<(), SysError> {
+    Err(SysError::sys(libc::ENOSYS, "readahead"))
+}
+
+#[cfg(all(target_os = "android", target_arch = "aarch64"))]
+#[inline(always)]
+const fn readahead_syscall_number() -> libc::c_long {
+    213
+}
+
+#[cfg(any(
+    target_os = "linux",
+    all(target_os = "android", not(target_arch = "aarch64"))
+))]
+#[inline(always)]
+const fn readahead_syscall_number() -> libc::c_long {
+    libc::SYS_readahead
 }
 
 /// A snapshot of process status information from procfs.

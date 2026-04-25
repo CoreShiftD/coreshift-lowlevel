@@ -1,6 +1,6 @@
 [package]
 name = "coreshift-lowlevel"
-version = "0.1.0-preview.1"
+version = "0.1.1-preview.1"
 edition = "2024"
 description = "Stable, policy-neutral substrate for Linux system policy engines"
 license = "MPL-2.0"

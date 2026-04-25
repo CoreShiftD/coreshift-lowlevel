@@ -7,7 +7,10 @@ use crate::reactor::{Fd, Reactor};
 use crate::spawn::{Process, SpawnOptions, spawn_start};
 use crate::sys::{
     CancelPolicy, ExecContext, ProcessGroup, parse_proc_status, path_exists, path_lstat_exists,
+    readahead,
 };
+use std::fs::{File, remove_file};
+use std::io::Write;
 
 #[test]
 fn test_decode_inotify_events() {
@@ -178,4 +181,38 @@ fn test_path_existence() {
     std::fs::remove_file(&temp_file).unwrap();
     assert!(!path_exists(path_str));
     assert!(!path_lstat_exists(path_str));
+}
+
+#[test]
+fn test_readahead_small_temp_file() {
+    let path = std::env::temp_dir().join(format!(
+        "coreshift_test_readahead_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+
+    let mut file = File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&path)
+        .unwrap();
+    file.write_all(b"readahead test data").unwrap();
+    file.sync_all().unwrap();
+
+    match readahead(file, 0, 16) {
+        Ok(()) => {}
+        Err(err) if err.raw_os_error() == Some(libc::ENOSYS) => {
+            let _ = remove_file(&path);
+            eprintln!("skipping readahead test: unsupported on this target");
+            return;
+        }
+        Err(err) => panic!("readahead failed unexpectedly: {err}"),
+    }
+
+    remove_file(&path).unwrap();
 }
