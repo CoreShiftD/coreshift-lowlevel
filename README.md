@@ -1,6 +1,6 @@
 # CoreShift Low-Level Substrate
 
-A stable, policy-neutral substrate for interacting with Linux system primitives.
+A public-preview, policy-neutral substrate for interacting with Linux system primitives.
 
 `coreshift-lowlevel` provides foundational building blocks for building system policy engines, diagnostics tools, and process managers on Linux and Android. It focuses on safe resource ownership, non-blocking I/O multiplexing, and robust process lifecycle management.
 
