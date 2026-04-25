@@ -220,6 +220,9 @@ pub struct Reactor {
 
 impl Reactor {
     /// Create a new epoll reactor.
+    ///
+    /// # Errors
+    /// Returns [`SysError`] if `epoll_create1` fails.
     pub fn new() -> Result<Self, SysError> {
         let epfd = unsafe { libc::epoll_create1(libc::EPOLL_CLOEXEC) };
         syscall_ret(epfd, "epoll_create1")?;
@@ -234,6 +237,9 @@ impl Reactor {
     }
 
     /// Initialize inotify and add it to the reactor.
+    ///
+    /// # Errors
+    /// Returns [`SysError`] if `inotify_init1` or `epoll_ctl` fails.
     pub fn setup_inotify(&mut self) -> Result<Fd, SysError> {
         let fd = unsafe { libc::inotify_init1(libc::IN_CLOEXEC | libc::IN_NONBLOCK) };
         syscall_ret(fd, "inotify_init1")?;
@@ -246,6 +252,9 @@ impl Reactor {
     }
 
     /// Initialize signalfd for SIGCHLD and add it to the reactor.
+    ///
+    /// # Errors
+    /// Returns [`SysError`] if `sigprocmask`, `signalfd`, or `epoll_ctl` fails.
     pub fn setup_signalfd(&mut self) -> Result<(), SysError> {
         let mut mask: libc::sigset_t = unsafe { std::mem::zeroed() };
         unsafe { libc::sigemptyset(&mut mask) };
@@ -374,8 +383,11 @@ impl Reactor {
         };
 
         if n > 0 {
+            unsafe {
+                self.events_buf.set_len(n as usize);
+            }
             for i in 0..n as usize {
-                let ev = unsafe { *self.events_buf.as_ptr().add(i) };
+                let ev = self.events_buf[i];
                 let is_read = (ev.events & libc::EPOLLIN as u32) != 0;
                 let is_write = (ev.events & libc::EPOLLOUT as u32) != 0;
                 let is_err = (ev.events & (libc::EPOLLERR | libc::EPOLLHUP) as u32) != 0;

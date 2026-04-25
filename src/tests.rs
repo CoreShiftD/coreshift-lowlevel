@@ -38,7 +38,7 @@ fn test_decode_inotify_events() {
         InotifyEvent {
             wd: 1,
             mask: 2,
-            name_len: 0
+            name: None,
         }
     );
     assert_eq!(
@@ -46,7 +46,7 @@ fn test_decode_inotify_events() {
         InotifyEvent {
             wd: 2,
             mask: 4,
-            name_len: 8
+            name: Some("file.txt".to_string()),
         }
     );
 }
@@ -115,16 +115,16 @@ fn test_spawn_start_wait_false_validation() {
     };
 
     // Valid: wait=false, no I/O capture
-    assert!(spawn_start(0, opts.clone()).is_ok());
+    assert!(spawn_start(opts.clone()).is_ok());
 
     // Invalid: wait=false, capture_stdout=true
     opts.capture_stdout = true;
-    assert!(spawn_start(0, opts.clone()).is_err());
+    assert!(spawn_start(opts.clone()).is_err());
 
     // Invalid: wait=false, stdin=Some(...)
     opts.capture_stdout = false;
     opts.stdin = Some(vec![1, 2, 3].into_boxed_slice());
-    assert!(spawn_start(0, opts.clone()).is_err());
+    assert!(spawn_start(opts.clone()).is_err());
 }
 
 #[test]

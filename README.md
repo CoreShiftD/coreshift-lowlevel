@@ -21,6 +21,26 @@ Type-safe interaction with the Linux `inotify` subsystem. Supports draining pack
 ### System Probes
 Safe wrappers for `procfs` metadata, including process status, command lines, and system clock information.
 
+## Quick Start
+
+```rust
+use coreshift_lowlevel::spawn::{SpawnOptions, Output};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Spawn a process and capture its output
+    let output = SpawnOptions::builder(vec!["ls".to_string(), "-l".to_string()])
+        .capture_stdout()
+        .timeout_ms(5000)
+        .build()?
+        .run()?;
+
+    println!("Status: {:?}", output.status);
+    println!("Stdout: {}", String::from_utf8_lossy(&output.stdout));
+    
+    Ok(())
+}
+```
+
 ## Intended Use
 
 This crate is designed to be the "trusted OS boundary" for higher-level applications. It is strictly **policy-neutral**, providing the mechanisms (how to spawn, how to watch) while leaving the policy (what to spawn, when to watch) to the consumer.
@@ -32,7 +52,7 @@ It is particularly well-suited for:
 
 ## Stability
 
-The API is stable and intended as a foundation for production-grade software. While in public preview, additive improvements are preferred over breaking changes.
+Public preview. APIs may change before 1.0. This crate follows Semantic Versioning, but breaking changes may occur during the 0.x phase.
 
 ## License
 

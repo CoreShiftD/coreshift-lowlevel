@@ -1,6 +1,6 @@
 [package]
 name = "coreshift-lowlevel"
-version = "0.1.0"
+version = "0.1.0-preview.1"
 edition = "2024"
 description = "Stable, policy-neutral substrate for Linux system policy engines"
 license = "MPL-2.0"
@@ -17,4 +17,3 @@ pure = []
 [dependencies]
 libc = { version = "0.2", default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
-arrayvec = "0.7"

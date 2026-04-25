@@ -224,70 +224,22 @@ unsafe fn close_range_fast(keep_fd: Option<RawFd>) {
     {
         // try SYS_close_range (available on 5.9+)
         if let Some(fd) = keep_fd {
-            let r1 = unsafe { libc::syscall(436, 3, (fd - 1).max(2) as libc::c_uint, 0) };
-            let r2 = unsafe { libc::syscall(436, (fd + 1) as libc::c_uint, !0u32, 0) };
-            if r1 == 0 && r2 == 0 {
-                return;
-            }
+            let _ = unsafe { libc::syscall(436, 3, (fd - 1).max(2) as libc::c_uint, 0) };
+            let _ = unsafe { libc::syscall(436, (fd + 1) as libc::c_uint, !0u32, 0) };
         } else {
-            if unsafe { libc::syscall(436, 3, !0u32, 0) } == 0 {
-                return;
-            }
+            let _ = unsafe { libc::syscall(436, 3, !0u32, 0) };
         }
     }
     #[cfg(all(target_os = "linux", not(target_os = "android")))]
     {
         if let Some(fd) = keep_fd {
-            let r1 = unsafe {
+            let _ = unsafe {
                 libc::syscall(libc::SYS_close_range, 3, (fd - 1).max(2) as libc::c_uint, 0)
             };
-            let r2 =
+            let _ =
                 unsafe { libc::syscall(libc::SYS_close_range, (fd + 1) as libc::c_uint, !0u32, 0) };
-            if r1 == 0 && r2 == 0 {
-                return;
-            }
         } else {
-            if unsafe { libc::syscall(libc::SYS_close_range, 3, !0u32, 0) } == 0 {
-                return;
-            }
-        }
-    }
-
-    let skip_fd = keep_fd.unwrap_or(-1);
-    let dir_fd = unsafe {
-        libc::open(
-            c"/proc/self/fd".as_ptr(),
-            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
-        )
-    };
-    if dir_fd >= 0 {
-        let dir = unsafe { libc::fdopendir(dir_fd) };
-        if !dir.is_null() {
-            loop {
-                let entry = unsafe { libc::readdir(dir) };
-                if entry.is_null() {
-                    break;
-                }
-                let name = unsafe { std::ffi::CStr::from_ptr((*entry).d_name.as_ptr()) };
-                if let Ok(s) = name.to_str()
-                    && let Ok(fd) = s.parse::<i32>()
-                    && fd > 2
-                    && fd != skip_fd
-                    && fd != dir_fd
-                    && fd >= 0
-                {
-                    unsafe {
-                        libc::close(fd);
-                    }
-                }
-            }
-            unsafe {
-                libc::closedir(dir);
-            }
-        } else {
-            unsafe {
-                libc::close(dir_fd);
-            }
+            let _ = unsafe { libc::syscall(libc::SYS_close_range, 3, !0u32, 0) };
         }
     }
 }
@@ -430,6 +382,155 @@ pub struct SpawnOptions {
     pub early_exit: Option<fn(&[u8]) -> bool>,
 }
 
+impl SpawnOptions {
+    /// Create a new builder for process spawning.
+    pub fn builder(argv: Vec<String>) -> SpawnOptionsBuilder {
+        SpawnOptionsBuilder::new(argv)
+    }
+
+    /// Execute the process according to the options and block until completion.
+    pub fn run(self) -> Result<Output, SysError> {
+        spawn(self)
+    }
+}
+
+/// Builder for [`SpawnOptions`].
+pub struct SpawnOptionsBuilder {
+    argv: Vec<String>,
+    env: Option<Vec<String>>,
+    cwd: Option<String>,
+    stdin: Option<Box<[u8]>>,
+    capture_stdout: bool,
+    capture_stderr: bool,
+    wait: bool,
+    pgroup: ProcessGroup,
+    max_output: usize,
+    timeout_ms: Option<u32>,
+    kill_grace_ms: u32,
+    cancel: CancelPolicy,
+    backend: SpawnBackend,
+    early_exit: Option<fn(&[u8]) -> bool>,
+}
+
+impl SpawnOptionsBuilder {
+    /// Create a new builder with the specified argument vector.
+    pub fn new(argv: Vec<String>) -> Self {
+        Self {
+            argv,
+            env: None,
+            cwd: None,
+            stdin: None,
+            capture_stdout: false,
+            capture_stderr: false,
+            wait: true,
+            pgroup: ProcessGroup::default(),
+            max_output: 1024 * 1024,
+            timeout_ms: None,
+            kill_grace_ms: 2000,
+            cancel: CancelPolicy::Kill,
+            backend: SpawnBackend::Auto,
+            early_exit: None,
+        }
+    }
+
+    /// Set environment variables.
+    pub fn env(mut self, env: Vec<String>) -> Self {
+        self.env = Some(env);
+        self
+    }
+
+    /// Set the working directory.
+    pub fn cwd(mut self, cwd: String) -> Self {
+        self.cwd = Some(cwd);
+        self
+    }
+
+    /// Provide data to be written to the child's stdin.
+    pub fn stdin(mut self, data: impl Into<Box<[u8]>>) -> Self {
+        self.stdin = Some(data.into());
+        self
+    }
+
+    /// Enable stdout capture.
+    pub fn capture_stdout(mut self) -> Self {
+        self.capture_stdout = true;
+        self
+    }
+
+    /// Enable stderr capture.
+    pub fn capture_stderr(mut self) -> Self {
+        self.capture_stderr = true;
+        self
+    }
+
+    /// Set whether to wait for the process to terminate (default: true).
+    pub fn wait(mut self, wait: bool) -> Self {
+        self.wait = wait;
+        self
+    }
+
+    /// Set process group and isolation policy.
+    pub fn pgroup(mut self, pgroup: ProcessGroup) -> Self {
+        self.pgroup = pgroup;
+        self
+    }
+
+    /// Set the maximum output buffer size (default: 1MB).
+    pub fn max_output(mut self, max: usize) -> Self {
+        self.max_output = max;
+        self
+    }
+
+    /// Set the execution timeout in milliseconds.
+    pub fn timeout_ms(mut self, ms: u32) -> Self {
+        self.timeout_ms = Some(ms);
+        self
+    }
+
+    /// Set the grace period before SIGKILL (default: 2s).
+    pub fn kill_grace_ms(mut self, ms: u32) -> Self {
+        self.kill_grace_ms = ms;
+        self
+    }
+
+    /// Set the cancellation policy (default: Kill).
+    pub fn cancel(mut self, policy: CancelPolicy) -> Self {
+        self.cancel = policy;
+        self
+    }
+
+    /// Set the preferred spawning backend.
+    pub fn backend(mut self, backend: SpawnBackend) -> Self {
+        self.backend = backend;
+        self
+    }
+
+    /// Set an early exit callback.
+    pub fn early_exit(mut self, callback: fn(&[u8]) -> bool) -> Self {
+        self.early_exit = Some(callback);
+        self
+    }
+
+    /// Build the spawn options.
+    pub fn build(self) -> Result<SpawnOptions, SysError> {
+        let ctx = ExecContext::new(self.argv, self.env, self.cwd)?;
+        Ok(SpawnOptions {
+            ctx,
+            stdin: self.stdin,
+            capture_stdout: self.capture_stdout,
+            capture_stderr: self.capture_stderr,
+            wait: self.wait,
+            pgroup: self.pgroup,
+            max_output: self.max_output,
+            timeout_ms: self.timeout_ms,
+            kill_grace_ms: self.kill_grace_ms,
+            cancel: self.cancel,
+            backend: self.backend,
+            early_exit: self.early_exit,
+        })
+    }
+}
+
 /// The result of a process execution.
 #[derive(Debug)]
 pub struct Output {
@@ -515,7 +616,10 @@ use crate::reactor::Reactor;
 /// This initializes the pipes and starts the process, but does not block.
 /// The caller is responsible for adding the resulting pipe descriptors to a
 /// reactor and draining them.
-pub fn spawn_start(job_id: u64, opts: SpawnOptions) -> Result<RunningProcess, SysError> {
+///
+/// # Errors
+/// Returns [`SysError`] if pipe creation, process spawning, or backend selection fails.
+pub fn spawn_start(opts: SpawnOptions) -> Result<RunningProcess, SysError> {
     if !opts.wait && (opts.stdin.is_some() || opts.capture_stdout || opts.capture_stderr) {
         return Err(SysError::sys(
             libc::EINVAL,
@@ -526,8 +630,8 @@ pub fn spawn_start(job_id: u64, opts: SpawnOptions) -> Result<RunningProcess, Sy
     let backend = resolve_backend(&opts);
 
     let (pid, drain) = match backend {
-        Backend::PosixSpawn => spawn_posix_internal(job_id, opts)?,
-        Backend::Fork => spawn_fork_internal(job_id, opts)?,
+        Backend::PosixSpawn => spawn_posix_internal(opts)?,
+        Backend::Fork => spawn_fork_internal(opts)?,
     };
 
     Ok(RunningProcess {
@@ -540,6 +644,9 @@ pub fn spawn_start(job_id: u64, opts: SpawnOptions) -> Result<RunningProcess, Sy
 ///
 /// This is the primary high-level interface for process execution. It handles
 /// the full lifecycle, including I/O multiplexing and signal management.
+///
+/// # Errors
+/// Returns [`SysError`] if any underlying syscall (spawn, pipe, epoll) fails.
 pub fn spawn(opts: SpawnOptions) -> Result<Output, SysError> {
     let wait = opts.wait;
     let timeout_ms = opts.timeout_ms;
@@ -548,7 +655,7 @@ pub fn spawn(opts: SpawnOptions) -> Result<Output, SysError> {
     let pgroup = opts.pgroup;
 
     let mut reactor = Reactor::new()?;
-    let running = spawn_start(0, opts)?; // ID=0 is arbitrary for synchronous unmanaged spawn
+    let running = spawn_start(opts)?;
 
     let pid = running.process.pid();
     let mut drain = running.drain;
@@ -589,7 +696,7 @@ pub fn spawn(opts: SpawnOptions) -> Result<Output, SysError> {
     )
 }
 
-fn spawn_posix_internal(job_id: u64, opts: SpawnOptions) -> Result<(pid_t, SpawnDrain), SysError> {
+fn spawn_posix_internal(opts: SpawnOptions) -> Result<(pid_t, SpawnDrain), SysError> {
     let mut pipes = Pipes::new(
         opts.stdin.as_deref(),
         opts.capture_stdout,
@@ -696,24 +803,24 @@ fn spawn_posix_internal(job_id: u64, opts: SpawnOptions) -> Result<(pid_t, Spawn
     }
 
     // Explicitly tracked FDs that are already handled above.
-    let mut handled_fds = arrayvec::ArrayVec::<i32, 8>::new();
+    let mut handled_fds = Vec::new();
     if let Some(fd) = &pipes.stdin_r {
-        let _ = handled_fds.try_push(fd.raw());
+        handled_fds.push(fd.raw());
     }
     if let Some(fd) = &pipes.stdin_w {
-        let _ = handled_fds.try_push(fd.raw());
+        handled_fds.push(fd.raw());
     }
     if let Some(fd) = &pipes.stdout_r {
-        let _ = handled_fds.try_push(fd.raw());
+        handled_fds.push(fd.raw());
     }
     if let Some(fd) = &pipes.stdout_w {
-        let _ = handled_fds.try_push(fd.raw());
+        handled_fds.push(fd.raw());
     }
     if let Some(fd) = &pipes.stderr_r {
-        let _ = handled_fds.try_push(fd.raw());
+        handled_fds.push(fd.raw());
     }
     if let Some(fd) = &pipes.stderr_w {
-        let _ = handled_fds.try_push(fd.raw());
+        handled_fds.push(fd.raw());
     }
 
     // Prevent FD leaks in posix_spawn by strictly closing open descriptors
@@ -817,7 +924,7 @@ fn spawn_posix_internal(job_id: u64, opts: SpawnOptions) -> Result<(pid_t, Spawn
 
     let envp_ptr = envp.as_ref().map_or_else(
         || unsafe { environ as *const *mut c_char },
-        |e: &arrayvec::ArrayVec<*mut c_char, 64>| e.as_ptr(),
+        |e: &Vec<*mut c_char>| e.as_ptr(),
     );
 
     if let Err(e) = posix_ret(
@@ -833,7 +940,6 @@ fn spawn_posix_internal(job_id: u64, opts: SpawnOptions) -> Result<(pid_t, Spawn
     drop(pipes.stderr_w.take());
 
     let drain = crate::io::DrainState::new(
-        job_id,
         pipes.stdin_w.take().filter(|_| opts.stdin.is_some()),
         opts.stdin,
         pipes.stdout_r.take(),
@@ -845,7 +951,7 @@ fn spawn_posix_internal(job_id: u64, opts: SpawnOptions) -> Result<(pid_t, Spawn
     Ok((pid, drain))
 }
 
-fn spawn_fork_internal(job_id: u64, opts: SpawnOptions) -> Result<(pid_t, SpawnDrain), SysError> {
+fn spawn_fork_internal(opts: SpawnOptions) -> Result<(pid_t, SpawnDrain), SysError> {
     let mut pipes = Pipes::new(
         opts.stdin.as_deref(),
         opts.capture_stdout,
@@ -871,34 +977,28 @@ fn spawn_fork_internal(job_id: u64, opts: SpawnOptions) -> Result<(pid_t, SpawnD
         // Child
 
         // dup stdin
-        if let (Some(r), Some(_)) = (&pipes.stdin_r, &pipes.stdin_w)
-            && r.raw() != 0
-        {
-            // SAFETY: r.raw() is a valid fd. Target 0 is valid.
+        if let (Some(r), Some(_)) = (&pipes.stdin_r, &pipes.stdin_w) {
             unsafe {
                 libc::dup2(r.raw(), 0);
             }
         }
 
         // dup stdout
-        if let (Some(_), Some(w)) = (&pipes.stdout_r, &pipes.stdout_w)
-            && w.raw() != 1
-        {
-            // SAFETY: w.raw() is a valid fd. Target 1 is valid.
+        if let (Some(_), Some(w)) = (&pipes.stdout_r, &pipes.stdout_w) {
             unsafe {
                 libc::dup2(w.raw(), 1);
             }
         }
 
         // dup stderr
-        if let (Some(_), Some(w)) = (&pipes.stderr_r, &pipes.stderr_w)
-            && w.raw() != 2
-        {
-            // SAFETY: w.raw() is a valid fd. Target 2 is valid.
+        if let (Some(_), Some(w)) = (&pipes.stderr_r, &pipes.stderr_w) {
             unsafe {
                 libc::dup2(w.raw(), 2);
             }
         }
+
+        // SAFETY: Close all pipe FDs in child before exec, except the ones duped to 0,1,2.
+        pipes.close_all();
 
         // SAFETY: Closes all unused file descriptors.
         unsafe {
@@ -933,7 +1033,7 @@ fn spawn_fork_internal(job_id: u64, opts: SpawnOptions) -> Result<(pid_t, SpawnD
 
         let envp_ptr = envp.as_ref().map_or_else(
             || unsafe { environ as *const *mut c_char },
-            |e: &arrayvec::ArrayVec<*mut c_char, 64>| e.as_ptr(),
+            |e: &Vec<*mut c_char>| e.as_ptr(),
         );
 
         // unblock signals and reset SIGPIPE
@@ -959,7 +1059,6 @@ fn spawn_fork_internal(job_id: u64, opts: SpawnOptions) -> Result<(pid_t, SpawnD
     drop(pipes.stderr_w.take());
 
     let drain = crate::io::DrainState::new(
-        job_id,
         pipes.stdin_w.take().filter(|_| opts.stdin.is_some()),
         opts.stdin,
         pipes.stdout_r.take(),
@@ -1087,56 +1186,43 @@ fn wait_loop(
         for ev in events.iter().take(nevents) {
             let fd_token = Some(ev.token);
 
-            if ev.error {
-                if drain
-                    .stdout_slot
-                    .as_ref()
-                    .is_some_and(|s| s.token == fd_token)
-                {
-                    if let Some(slot) = drain.stdout_slot.take() {
-                        reactor.del(&slot.fd);
-                    }
-                } else if drain
-                    .stderr_slot
-                    .as_ref()
-                    .is_some_and(|s| s.token == fd_token)
-                {
-                    if let Some(slot) = drain.stderr_slot.take() {
-                        reactor.del(&slot.fd);
-                    }
-                } else if drain
-                    .stdin_slot
-                    .as_ref()
-                    .is_some_and(|s| s.token == fd_token)
-                    && let Some(slot) = drain.stdin_slot.take()
-                {
-                    reactor.del(&slot.fd);
-                    drain.writer.buf = None;
-                }
-                continue;
-            }
-
             if drain
                 .stdout_slot
                 .as_ref()
                 .is_some_and(|s| s.token == fd_token)
-                && ev.readable
             {
-                let _ = drain.read_fd(true)?;
+                if ev.readable {
+                    let _ = drain.read_fd(true)?;
+                } else if ev.error
+                    && let Some(slot) = drain.stdout_slot.take()
+                {
+                    reactor.del(&slot.fd);
+                }
             } else if drain
                 .stderr_slot
                 .as_ref()
                 .is_some_and(|s| s.token == fd_token)
-                && ev.readable
             {
-                let _ = drain.read_fd(false)?;
+                if ev.readable {
+                    let _ = drain.read_fd(false)?;
+                } else if ev.error
+                    && let Some(slot) = drain.stderr_slot.take()
+                {
+                    reactor.del(&slot.fd);
+                }
             } else if drain
                 .stdin_slot
                 .as_ref()
                 .is_some_and(|s| s.token == fd_token)
-                && ev.writable
             {
-                let _ = drain.write_stdin()?;
+                if ev.writable {
+                    let _ = drain.write_stdin()?;
+                } else if ev.error {
+                    if let Some(slot) = drain.stdin_slot.take() {
+                        reactor.del(&slot.fd);
+                    }
+                    drain.writer.buf = None;
+                }
             }
         }
     }

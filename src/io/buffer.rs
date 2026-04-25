@@ -19,7 +19,7 @@ const READ_CHUNK: usize = 65536;
 /// misbehaving processes.
 #[derive(Default)]
 #[repr(align(64))]
-pub struct BufferState {
+pub(crate) struct BufferState {
     stdout: Vec<u8>,
     stderr: Vec<u8>,
     limit: usize,
@@ -27,7 +27,7 @@ pub struct BufferState {
 
 impl BufferState {
     /// Create a new buffer state with the specified memory limit.
-    pub fn new(limit: usize) -> Self {
+    pub(crate) fn new(limit: usize) -> Self {
         Self {
             stdout: Vec::with_capacity(1024),
             stderr: Vec::with_capacity(1024),
@@ -41,7 +41,7 @@ impl BufferState {
     /// * `Ok(true)` if EOF was reached.
     /// * `Ok(false)` if the operation would block (`EAGAIN`).
     #[inline(always)]
-    pub fn read_from_fd(
+    pub(crate) fn read_from_fd(
         &mut self,
         fd: &Fd,
         is_stdout: bool,
@@ -54,7 +54,6 @@ impl BufferState {
         };
 
         loop {
-            let cap = dest.capacity();
             let len = dest.len();
             let remaining_limit = self.limit.saturating_sub(len);
 
@@ -75,18 +74,14 @@ impl BufferState {
                 }
             }
 
-            // Ensure capacity and read directly into uninitialized space
+            // Ensure space and read directly into the Vec.
+            // We resize with 0s to remain safe (no UB with uninitialized memory).
             let to_read = remaining_limit.min(READ_CHUNK);
-            if cap - len < to_read {
-                dest.reserve(to_read);
-            }
+            dest.resize(len + to_read, 0);
 
-            let ptr = unsafe { dest.as_mut_ptr().add(len) };
-            match fd.read(ptr, to_read) {
+            match fd.read(dest[len..].as_mut_ptr(), to_read) {
                 Ok(Some(n)) if n > 0 => {
-                    unsafe {
-                        dest.set_len(len + n);
-                    }
+                    dest.truncate(len + n);
 
                     if is_stdout
                         && let Some(f) = early_exit
@@ -96,12 +91,15 @@ impl BufferState {
                     }
                 }
                 Ok(Some(_)) => {
+                    dest.truncate(len);
                     return Ok(true); // EOF
                 }
                 Ok(None) => {
+                    dest.truncate(len);
                     return Ok(false);
                 } // Would block
                 Err(e) => {
+                    dest.truncate(len);
                     return Err(e);
                 }
             }
@@ -109,7 +107,7 @@ impl BufferState {
     }
 
     /// Consume the state and return the accumulated buffers.
-    pub fn into_parts(mut self) -> (Vec<u8>, Vec<u8>) {
+    pub(crate) fn into_parts(mut self) -> (Vec<u8>, Vec<u8>) {
         (
             std::mem::take(&mut self.stdout),
             std::mem::take(&mut self.stderr),

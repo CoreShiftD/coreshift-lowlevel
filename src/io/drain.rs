@@ -65,7 +65,6 @@ where
     ///
     /// This consumes the descriptors and sets them to non-blocking mode.
     pub fn new(
-        _job_id: u64,
         stdin_fd: Option<Fd>,
         stdin_buf: Option<Box<[u8]>>,
         stdout_fd: Option<Fd>,

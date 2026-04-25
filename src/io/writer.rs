@@ -13,14 +13,14 @@ use crate::spawn::SysError;
 const WRITE_CHUNK: usize = 65536;
 
 /// Manages the transmission of a fixed buffer to a pipe.
-pub struct WriterState {
+pub(crate) struct WriterState {
     pub(crate) buf: Option<Box<[u8]>>,
     off: usize,
 }
 
 impl WriterState {
     /// Create a new writer state for the specified buffer.
-    pub fn new(buf: Option<Box<[u8]>>) -> Self {
+    pub(crate) fn new(buf: Option<Box<[u8]>>) -> Self {
         Self { buf, off: 0 }
     }
 
@@ -30,7 +30,7 @@ impl WriterState {
     /// * `Ok(true)` if the entire buffer has been written or the pipe is closed.
     /// * `Ok(false)` if the operation would block (`EAGAIN`).
     #[inline(always)]
-    pub fn write_to_fd(&mut self, fd: &Fd) -> Result<bool, SysError> {
+    pub(crate) fn write_to_fd(&mut self, fd: &Fd) -> Result<bool, SysError> {
         if let Some(buf) = &self.buf {
             while self.off < buf.len() {
                 let remaining = buf.len() - self.off;

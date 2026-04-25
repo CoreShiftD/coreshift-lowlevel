@@ -185,8 +185,6 @@ impl ProcessGroup {
     }
 }
 
-use arrayvec::ArrayVec;
-
 /// Owned argument vector storage.
 #[derive(Clone)]
 pub enum ExecArgv {
@@ -257,48 +255,38 @@ impl ExecContext {
         })
     }
 
-    /// Return a fixed-size array of pointers to the argument strings.
+    /// Return a vector of pointers to the argument strings.
     ///
     /// ### Advanced API
     /// This returns raw pointers to the underlying `CString` storage. The
     /// pointers are only valid as long as the `ExecContext` is not dropped or
     /// modified.
-    pub fn get_argv_ptrs(&self) -> ArrayVec<*mut c_char, 64> {
-        let mut ptrs = ArrayVec::new();
+    pub(crate) fn get_argv_ptrs(&self) -> Vec<*mut c_char> {
+        let mut ptrs = Vec::new();
         match &self.argv {
             ExecArgv::Dynamic(v) => {
                 for s in v {
-                    if ptrs.try_push(s.as_ptr() as *mut c_char).is_err() {
-                        break;
-                    }
+                    ptrs.push(s.as_ptr() as *mut c_char);
                 }
             }
         }
-        if ptrs.is_full() {
-            ptrs.pop(); // Ensure room for null terminator
-        }
-        let _ = ptrs.try_push(ptr::null_mut());
+        ptrs.push(ptr::null_mut());
         ptrs
     }
 
-    /// Return a fixed-size array of pointers to the environment strings.
+    /// Return a vector of pointers to the environment strings.
     ///
     /// ### Advanced API
     /// This returns raw pointers to the underlying `CString` storage. The
     /// pointers are only valid as long as the `ExecContext` is not dropped or
     /// modified.
-    pub fn get_envp_ptrs(&self) -> Option<ArrayVec<*mut c_char, 64>> {
+    pub(crate) fn get_envp_ptrs(&self) -> Option<Vec<*mut c_char>> {
         self.envp.as_ref().map(|envp| {
-            let mut ptrs = ArrayVec::new();
+            let mut ptrs = Vec::new();
             for s in envp {
-                if ptrs.try_push(s.as_ptr() as *mut c_char).is_err() {
-                    break;
-                }
+                ptrs.push(s.as_ptr() as *mut c_char);
             }
-            if ptrs.is_full() {
-                ptrs.pop(); // Ensure room for null terminator
-            }
-            let _ = ptrs.try_push(ptr::null_mut());
+            ptrs.push(ptr::null_mut());
             ptrs
         })
     }

@@ -16,19 +16,15 @@ use crate::spawn::SysError;
 
 /// A decoded inotify event header.
 ///
-/// This structure represents the fixed-size portion of an `inotify_event`.
-///
-/// NOTE: The `name` field is currently skipped during decoding. Directory
-/// watches that require filtering by child filename must be extended to
-/// capture the variable-length name buffer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// This structure represents an `inotify_event` including its optional name.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InotifyEvent {
     /// Watch descriptor that generated this event.
     pub wd: i32,
     /// Event mask (e.g., [`MODIFY_MASK`]).
     pub mask: u32,
-    /// Length of the name field (0 if no name is present).
-    pub name_len: u32,
+    /// Optional name associated with the event (e.g., filename in a watched directory).
+    pub name: Option<String>,
 }
 
 /// File was modified.
@@ -52,6 +48,9 @@ pub const MOVE_SELF_MASK: u32 = libc::IN_MOVE_SELF;
 /// * `fd` - The inotify file descriptor.
 /// * `path` - Path to the file or directory to watch.
 /// * `mask` - Events to monitor (e.g., [`MODIFY_MASK`]).
+///
+/// # Errors
+/// Returns [`SysError`] if `inotify_add_watch` fails or if the path contains a NUL byte.
 pub fn add_watch(fd: &Fd, path: &str, mask: u32) -> Result<i32, SysError> {
     let path = std::ffi::CString::new(path)
         .map_err(|_| SysError::sys(libc::EINVAL, "inotify path contains nul"))?;
@@ -69,6 +68,9 @@ pub fn add_watch(fd: &Fd, path: &str, mask: u32) -> Result<i32, SysError> {
 ///
 /// This function drains the inotify file descriptor until no more events
 /// are available (`EAGAIN`). It is safe to use with edge-triggered reactors.
+///
+/// # Errors
+/// Returns [`SysError`] if a `read` syscall fails (excluding `EAGAIN`/`EWOULDBLOCK`).
 pub fn read_events(fd: &Fd) -> Result<Vec<InotifyEvent>, SysError> {
     let mut all_events = Vec::new();
     let mut buf = vec![0u8; 4096];
@@ -109,10 +111,21 @@ pub fn decode_events(buf: &[u8]) -> Vec<InotifyEvent> {
             break;
         }
 
+        let name = if event.len > 0 {
+            let name_buf = &buf[offset + base..offset + base + event.len as usize];
+            // Name is null-terminated, but may have multiple trailing nulls for padding.
+            name_buf
+                .split(|&b| b == 0)
+                .next()
+                .map(|s| String::from_utf8_lossy(s).into_owned())
+        } else {
+            None
+        };
+
         events.push(InotifyEvent {
             wd: event.wd,
             mask: event.mask,
-            name_len: event.len,
+            name,
         });
         offset += size;
     }
