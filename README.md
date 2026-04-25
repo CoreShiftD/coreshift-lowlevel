@@ -4,6 +4,15 @@ A stable, policy-neutral substrate for interacting with Linux system primitives.
 
 `coreshift-lowlevel` provides foundational building blocks for building system policy engines, diagnostics tools, and process managers on Linux and Android. It focuses on safe resource ownership, non-blocking I/O multiplexing, and robust process lifecycle management.
 
+## Installation
+
+Add this to your `Cargo.toml`:
+
+```toml
+[dependencies]
+coreshift-lowlevel = { git = "https://github.com/CoreShiftD/coreshift-lowlevel", tag = "v0.1.0-preview.1" }
+```
+
 ## Features
 
 ### Asynchronous Reactor
