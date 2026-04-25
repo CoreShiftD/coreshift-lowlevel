@@ -22,6 +22,7 @@ use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 /// Probe whether a filesystem path is accessible and exists.
 ///
@@ -85,6 +86,59 @@ fn stat_uid(path: &Path, op: &'static str) -> Result<u32, SysError> {
 
     syscall_ret(ret, op)?;
     Ok(stat_buf.st_uid)
+}
+
+static SHUTDOWN_FLAG_PTR: AtomicPtr<AtomicBool> = AtomicPtr::new(std::ptr::null_mut());
+
+extern "C" fn shutdown_signal_handler(_sig: libc::c_int) {
+    let flag = SHUTDOWN_FLAG_PTR.load(Ordering::Relaxed);
+    if !flag.is_null() {
+        unsafe {
+            (*flag).store(true, Ordering::Release);
+        }
+    }
+}
+
+/// Install SIGINT and SIGTERM handlers that flip a shared shutdown flag.
+///
+/// This is intended for simple daemon shutdown loops that want a reusable
+/// signal hook without direct `sigaction(2)` setup. The handlers are
+/// process-global, so a later install replaces the previously configured flag
+/// and handler target. The handler itself only flips the atomic bool.
+pub fn install_shutdown_flag(flag: &'static AtomicBool) -> Result<(), SysError> {
+    SHUTDOWN_FLAG_PTR.store(
+        flag as *const AtomicBool as *mut AtomicBool,
+        Ordering::Release,
+    );
+    install_signal_handler(libc::SIGINT)?;
+    install_signal_handler(libc::SIGTERM)?;
+    Ok(())
+}
+
+/// Return whether a shutdown flag was flipped by the installed handler.
+#[inline]
+pub fn shutdown_requested(flag: &AtomicBool) -> bool {
+    flag.load(Ordering::Acquire)
+}
+
+fn install_signal_handler(sig: libc::c_int) -> Result<(), SysError> {
+    let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+    action.sa_sigaction = shutdown_signal_handler as *const () as usize;
+    action.sa_flags = 0;
+    unsafe { libc::sigemptyset(&mut action.sa_mask) };
+
+    let ret = unsafe { libc::sigaction(sig, &action, std::ptr::null_mut()) };
+    if ret == -1 {
+        let op = match sig {
+            libc::SIGINT => "sigaction(SIGINT)",
+            libc::SIGTERM => "sigaction(SIGTERM)",
+            _ => "sigaction",
+        };
+        let code = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+        Err(SysError::sys(code, op))
+    } else {
+        Ok(())
+    }
 }
 
 /// Advise the kernel to begin reading file data into the page cache.

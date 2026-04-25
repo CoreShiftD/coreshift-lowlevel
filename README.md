@@ -10,7 +10,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-coreshift-lowlevel = { git = "https://github.com/CoreShiftD/coreshift-lowlevel", tag = "v0.1.2-preview.1" }
+coreshift-lowlevel = { git = "https://github.com/CoreShiftD/coreshift-lowlevel", tag = "v0.1.3-preview.1" }
 ```
 
 ## Features
@@ -32,6 +32,9 @@ Safe wrappers for `procfs` metadata, including process status, command lines, an
 
 ### Proc Ownership Helpers
 Cheap ownership probes for filesystem paths and `/proc/<pid>` entries, useful before reading procfs files in policy code.
+
+### Signal Shutdown Helpers
+Reusable SIGINT/SIGTERM shutdown hooks for simple daemon loops that want an atomic flag instead of raw `sigaction` boilerplate.
 
 ## Quick Start
 

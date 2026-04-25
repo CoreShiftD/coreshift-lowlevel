@@ -6,12 +6,13 @@ use crate::inotify::{InotifyEvent, decode_events};
 use crate::reactor::{Fd, Reactor};
 use crate::spawn::{Process, SpawnOptions, spawn_start};
 use crate::sys::{
-    CancelPolicy, ExecContext, ProcessGroup, parse_proc_status, path_exists, path_lstat_exists,
-    path_uid, proc_uid, readahead,
+    CancelPolicy, ExecContext, ProcessGroup, install_shutdown_flag, parse_proc_status, path_exists,
+    path_lstat_exists, path_uid, proc_uid, readahead, shutdown_requested,
 };
 use std::fs::{File, remove_file};
 use std::io::Write;
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 fn with_temp_readahead_file<T>(f: impl FnOnce(File, &std::path::Path) -> T) -> T {
     let path = std::env::temp_dir().join(format!(
@@ -49,6 +50,9 @@ fn assert_readahead_result(result: Result<(), crate::spawn::SysError>) {
 }
 
 struct RawFdRef(RawFd);
+
+static TEST_SHUTDOWN_FLAG_A: AtomicBool = AtomicBool::new(false);
+static TEST_SHUTDOWN_FLAG_B: AtomicBool = AtomicBool::new(false);
 
 impl AsRawFd for RawFdRef {
     fn as_raw_fd(&self) -> RawFd {
@@ -269,6 +273,29 @@ fn test_path_uid_missing_path_returns_error() {
     ));
     let err = path_uid(&path).unwrap_err();
     assert_eq!(err.raw_os_error(), Some(libc::ENOENT));
+}
+
+#[test]
+fn test_install_shutdown_flag_compiles_and_sets_helper_state() {
+    TEST_SHUTDOWN_FLAG_A.store(false, Ordering::Release);
+    install_shutdown_flag(&TEST_SHUTDOWN_FLAG_A).unwrap();
+    assert!(!shutdown_requested(&TEST_SHUTDOWN_FLAG_A));
+
+    TEST_SHUTDOWN_FLAG_A.store(true, Ordering::Release);
+    assert!(shutdown_requested(&TEST_SHUTDOWN_FLAG_A));
+    TEST_SHUTDOWN_FLAG_A.store(false, Ordering::Release);
+}
+
+#[test]
+fn test_install_shutdown_flag_repeated_install_does_not_panic() {
+    TEST_SHUTDOWN_FLAG_A.store(false, Ordering::Release);
+    TEST_SHUTDOWN_FLAG_B.store(false, Ordering::Release);
+
+    install_shutdown_flag(&TEST_SHUTDOWN_FLAG_A).unwrap();
+    install_shutdown_flag(&TEST_SHUTDOWN_FLAG_B).unwrap();
+
+    assert!(!shutdown_requested(&TEST_SHUTDOWN_FLAG_A));
+    assert!(!shutdown_requested(&TEST_SHUTDOWN_FLAG_B));
 }
 
 #[test]
