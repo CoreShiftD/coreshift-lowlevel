@@ -356,30 +356,18 @@ impl Process {
 /// Configuration options for spawning a new process.
 #[derive(Clone)]
 pub struct SpawnOptions {
-    /// Execution context (argv, env, cwd).
-    pub ctx: ExecContext,
-    /// Optional buffer to write to the child's stdin.
-    pub stdin: Option<Box<[u8]>>,
-    /// Capture the child's stdout.
-    pub capture_stdout: bool,
-    /// Capture the child's stderr.
-    pub capture_stderr: bool,
-    /// Wait for the process to terminate.
-    pub wait: bool,
-    /// Process group and isolation settings.
-    pub pgroup: ProcessGroup,
-    /// Maximum number of bytes to capture from output streams.
-    pub max_output: usize,
-    /// Optional execution timeout in milliseconds.
-    pub timeout_ms: Option<u32>,
-    /// Grace period in milliseconds before `SIGKILL` after `SIGTERM`.
-    pub kill_grace_ms: u32,
-    /// Policy for handling process cancellation/timeout.
-    pub cancel: CancelPolicy,
-    /// Advisory selection of the spawning backend.
-    pub backend: SpawnBackend,
-    /// Optional closure called on each stdout chunk; return `true` to exit early.
-    pub early_exit: Option<fn(&[u8]) -> bool>,
+    ctx: ExecContext,
+    stdin: Option<Box<[u8]>>,
+    capture_stdout: bool,
+    capture_stderr: bool,
+    wait: bool,
+    pgroup: ProcessGroup,
+    max_output: usize,
+    timeout_ms: Option<u32>,
+    kill_grace_ms: u32,
+    cancel: CancelPolicy,
+    backend: SpawnBackend,
+    early_exit: Option<fn(&[u8]) -> bool>,
 }
 
 impl SpawnOptions {
@@ -395,6 +383,7 @@ impl SpawnOptions {
 }
 
 /// Builder for [`SpawnOptions`].
+#[derive(Clone)]
 pub struct SpawnOptionsBuilder {
     argv: Vec<String>,
     env: Option<Vec<String>>,

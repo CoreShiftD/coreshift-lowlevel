@@ -6,8 +6,8 @@ use crate::inotify::{InotifyEvent, decode_events};
 use crate::reactor::{Fd, Reactor};
 use crate::spawn::{Process, SpawnOptions, spawn_start};
 use crate::sys::{
-    CancelPolicy, ExecContext, ProcessGroup, install_shutdown_flag, parse_proc_status, path_exists,
-    path_lstat_exists, path_uid, proc_uid, readahead, shutdown_requested,
+    install_shutdown_flag, parse_proc_status, path_exists, path_lstat_exists, path_uid, proc_uid,
+    readahead, shutdown_requested,
 };
 use std::fs::{File, remove_file};
 use std::io::Write;
@@ -113,23 +113,17 @@ fn test_parse_proc_status() {
 #[test]
 fn test_exec_context_validation() {
     // Empty argv
-    let res = ExecContext::new(vec![], None, None);
+    let res = SpawnOptions::builder(vec![]).build();
     assert!(res.is_err());
 
     // Interior NUL in argv
-    let res = ExecContext::new(
-        vec!["valid".to_string(), "inv\0alid".to_string()],
-        None,
-        None,
-    );
+    let res = SpawnOptions::builder(vec!["valid".to_string(), "inv\0alid".to_string()]).build();
     assert!(res.is_err());
 
     // Valid
-    let res = ExecContext::new(
-        vec!["ls".to_string(), "-l".to_string()],
-        None,
-        Some("/tmp".to_string()),
-    );
+    let res = SpawnOptions::builder(vec!["ls".to_string(), "-l".to_string()])
+        .cwd("/tmp".to_string())
+        .build();
     assert!(res.is_ok());
 }
 
@@ -144,38 +138,23 @@ fn test_process_echild() {
 
 #[test]
 fn test_spawn_start_wait_false_validation() {
-    let ctx = ExecContext::new(
-        vec!["/bin/sh".to_string(), "-c".to_string(), "true".to_string()],
-        None,
-        None,
-    )
-    .unwrap();
-    let mut opts = SpawnOptions {
-        ctx,
-        stdin: None,
-        capture_stdout: false,
-        capture_stderr: false,
-        wait: false,
-        pgroup: ProcessGroup::default(),
-        max_output: 1024,
-        timeout_ms: None,
-        kill_grace_ms: 1000,
-        cancel: CancelPolicy::Kill,
-        backend: crate::spawn::SpawnBackend::Auto,
-        early_exit: None,
-    };
+    let base_builder = SpawnOptions::builder(vec![
+        "/bin/sh".to_string(),
+        "-c".to_string(),
+        "true".to_string(),
+    ])
+    .wait(false)
+    .max_output(1024)
+    .kill_grace_ms(1000);
 
     // Valid: wait=false, no I/O capture
-    assert!(spawn_start(opts.clone()).is_ok());
+    assert!(spawn_start(base_builder.clone().build().unwrap()).is_ok());
 
     // Invalid: wait=false, capture_stdout=true
-    opts.capture_stdout = true;
-    assert!(spawn_start(opts.clone()).is_err());
+    assert!(spawn_start(base_builder.clone().capture_stdout().build().unwrap()).is_err());
 
     // Invalid: wait=false, stdin=Some(...)
-    opts.capture_stdout = false;
-    opts.stdin = Some(vec![1, 2, 3].into_boxed_slice());
-    assert!(spawn_start(opts.clone()).is_err());
+    assert!(spawn_start(base_builder.stdin(vec![1, 2, 3]).build().unwrap()).is_err());
 }
 
 #[test]

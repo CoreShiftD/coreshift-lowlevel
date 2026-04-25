@@ -383,20 +383,17 @@ impl ProcessGroup {
 
 /// Owned argument vector storage.
 #[derive(Clone)]
-pub enum ExecArgv {
+pub(crate) enum ExecArgv {
     /// Dynamically allocated C-compatible strings.
     Dynamic(Vec<CString>),
 }
 
 /// Validated execution context for process spawning.
 #[derive(Clone)]
-pub struct ExecContext {
-    /// The argument vector.
-    pub argv: ExecArgv,
-    /// Optional environment variables.
-    pub envp: Option<Vec<CString>>,
-    /// Optional working directory.
-    pub cwd: Option<CString>,
+pub(crate) struct ExecContext {
+    pub(crate) argv: ExecArgv,
+    pub(crate) envp: Option<Vec<CString>>,
+    pub(crate) cwd: Option<CString>,
 }
 
 impl ExecContext {
@@ -405,7 +402,7 @@ impl ExecContext {
     /// Rejections are explicit:
     /// - empty argv is invalid
     /// - interior NUL bytes in argv/env/cwd are invalid
-    pub fn new(
+    pub(crate) fn new(
         argv: Vec<String>,
         env: Option<Vec<String>>,
         cwd: Option<String>,
