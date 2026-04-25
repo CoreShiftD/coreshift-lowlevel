@@ -63,25 +63,32 @@ pub fn read_to_string(path: &str) -> Result<String, std::io::Error> {
 ///
 /// The `offset` and `len` identify the byte range to prefetch for `fd`.
 /// Success means the kernel accepted the request, not that subsequent reads are
-/// guaranteed to be cache hits.
+/// guaranteed to be cache hits. The syscall also behaves asynchronously in the
+/// common case: it may return before background read-ahead has completed.
 pub fn readahead(fd: impl AsRawFd, offset: u64, len: usize) -> Result<(), SysError> {
     readahead_raw(fd.as_raw_fd(), offset, len)
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn readahead_raw(fd: libc::c_int, offset: u64, len: usize) -> Result<(), SysError> {
-    if offset > i64::MAX as u64 {
+    if offset > libc::off64_t::MAX as u64 {
         return Err(SysError::sys(libc::EINVAL, "readahead"));
     }
 
-    let ret =
-        unsafe { libc::syscall(readahead_syscall_number(), fd, offset as libc::off64_t, len) };
+    let count = len.min(libc::c_uint::MAX as usize);
+    let offset = offset as libc::off64_t;
 
-    if ret == -1 {
-        let code = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-        Err(SysError::sys(code, "readahead"))
-    } else {
-        Ok(())
+    loop {
+        let ret = unsafe { libc::syscall(readahead_syscall_number(), fd, offset, count) };
+
+        if ret == -1 {
+            let code = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            if code == libc::EINTR {
+                continue;
+            }
+            return Err(SysError::sys(code, "readahead"));
+        }
+        return Ok(());
     }
 }
 
@@ -103,6 +110,24 @@ const fn readahead_syscall_number() -> libc::c_long {
 #[inline(always)]
 const fn readahead_syscall_number() -> libc::c_long {
     libc::SYS_readahead
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(any(
+        target_os = "linux",
+        all(target_os = "android", not(target_arch = "aarch64"))
+    ))]
+    #[test]
+    fn test_readahead_syscall_number_matches_libc() {
+        assert_eq!(super::readahead_syscall_number(), libc::SYS_readahead);
+    }
+
+    #[cfg(all(target_os = "android", target_arch = "aarch64"))]
+    #[test]
+    fn test_readahead_syscall_number_android_aarch64_fallback() {
+        assert_eq!(super::readahead_syscall_number(), 213);
+    }
 }
 
 /// A snapshot of process status information from procfs.

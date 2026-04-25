@@ -11,6 +11,50 @@ use crate::sys::{
 };
 use std::fs::{File, remove_file};
 use std::io::Write;
+use std::os::unix::io::{AsRawFd, RawFd};
+
+fn with_temp_readahead_file<T>(f: impl FnOnce(File, &std::path::Path) -> T) -> T {
+    let path = std::env::temp_dir().join(format!(
+        "coreshift_test_readahead_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+
+    let mut file = File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&path)
+        .unwrap();
+    file.write_all(b"readahead test data").unwrap();
+    file.sync_all().unwrap();
+
+    let result = f(file, &path);
+    let _ = remove_file(&path);
+    result
+}
+
+fn assert_readahead_result(result: Result<(), crate::spawn::SysError>) {
+    match result {
+        Ok(()) => {}
+        Err(err) if err.raw_os_error() == Some(libc::ENOSYS) => {
+            eprintln!("skipping readahead test: unsupported on this target");
+        }
+        Err(err) => panic!("readahead failed unexpectedly: {err}"),
+    }
+}
+
+struct RawFdRef(RawFd);
+
+impl AsRawFd for RawFdRef {
+    fn as_raw_fd(&self) -> RawFd {
+        self.0
+    }
+}
 
 #[test]
 fn test_decode_inotify_events() {
@@ -185,34 +229,34 @@ fn test_path_existence() {
 
 #[test]
 fn test_readahead_small_temp_file() {
-    let path = std::env::temp_dir().join(format!(
-        "coreshift_test_readahead_{}_{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    with_temp_readahead_file(|file, _| {
+        assert_readahead_result(readahead(file, 0, 16));
+    });
+}
 
-    let mut file = File::options()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(&path)
-        .unwrap();
-    file.write_all(b"readahead test data").unwrap();
-    file.sync_all().unwrap();
+#[test]
+fn test_readahead_zero_length() {
+    with_temp_readahead_file(|file, _| {
+        assert_readahead_result(readahead(file, 0, 0));
+    });
+}
 
-    match readahead(file, 0, 16) {
-        Ok(()) => {}
+#[test]
+fn test_readahead_offset_beyond_eof() {
+    with_temp_readahead_file(|file, _| {
+        assert_readahead_result(readahead(file, 1 << 20, 16));
+    });
+}
+
+#[test]
+fn test_readahead_invalid_fd() {
+    let result = readahead(RawFdRef(-1), 0, 16);
+    match result {
+        Err(err) if err.raw_os_error() == Some(libc::EBADF) => {}
         Err(err) if err.raw_os_error() == Some(libc::ENOSYS) => {
-            let _ = remove_file(&path);
             eprintln!("skipping readahead test: unsupported on this target");
-            return;
         }
-        Err(err) => panic!("readahead failed unexpectedly: {err}"),
+        Err(err) => panic!("expected EBADF from invalid fd, got: {err}"),
+        Ok(()) => panic!("expected invalid fd to fail"),
     }
-
-    remove_file(&path).unwrap();
 }
