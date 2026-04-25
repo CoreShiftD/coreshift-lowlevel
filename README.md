@@ -10,7 +10,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-coreshift-lowlevel = { git = "https://github.com/CoreShiftD/coreshift-lowlevel", tag = "v0.1.3-preview.1" }
+coreshift-lowlevel = { git = "https://github.com/CoreShiftD/coreshift-lowlevel", tag = "v0.1.3-preview.2" }
 ```
 
 ## Features
@@ -39,7 +39,7 @@ Reusable SIGINT/SIGTERM shutdown hooks for simple daemon loops that want an atom
 ## Quick Start
 
 ```rust
-use coreshift_lowlevel::spawn::{SpawnOptions, Output};
+use coreshift_lowlevel::spawn::SpawnOptions;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn a process and capture its output
@@ -51,7 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Status: {:?}", output.status);
     println!("Stdout: {}", String::from_utf8_lossy(&output.stdout));
-    
+
     Ok(())
 }
 ```
