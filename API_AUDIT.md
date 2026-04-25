@@ -39,28 +39,34 @@ Date: 2026-04-25
 - `SpawnOptions`, `SpawnOptionsBuilder`, `ProcessGroup`, `CancelPolicy`, `SpawnBackend`
 - `InotifyDecoder`, `InotifyEvent`
 
-## 2. Items exposed primarily due to visibility constraints
-- **`FdSlot`**: Used as a return type in `DrainState`.
-- **`ExecContext`**, **`ExecArgv`**: Used as public fields in `SpawnOptions`.
-
-## 3. Proposal for v0.2.0 (Breaking Changes)
+## 2. Resolved in v0.2.0-preview.1
 
 ### `io::drain::FdSlot`
-- **Current**: `pub struct FdSlot { pub token: Option<Token>, pub fd: Fd }`
-- **Issue**: Leaks internal resource tracking structure.
-- **Proposal**: Make `pub(crate)`. Change `DrainState` methods (`read_fd`, `write_stdin`) to return `Result<Option<Token>, SysError>`. The `Fd` is already managed by `DrainState` or dropped when the slot is taken.
+- **Status**: Resolved in `v0.2.0-preview.1`
+- **Change**: `FdSlot` is now `pub(crate)`, and `DrainState` no longer returns slot ownership to public callers.
 
 ### `sys::ExecContext` and `sys::ExecArgv`
-- **Current**: `pub`
-- **Issue**: Exposes implementation details of how arguments are stored (using `CString`).
-- **Proposal**: Make `pub(crate)`. Hide `SpawnOptions::ctx` or make it a private field.
+- **Status**: Resolved in `v0.2.0-preview.1`
+- **Change**: Both types are now crate-private construction details behind the spawn builder path.
 
 ### `SpawnOptions` fields
-- **Current**: All fields are `pub`.
-- **Issue**: Prevents adding new options without a breaking change.
-- **Proposal**: Make all fields private. Provide accessors if needed, but encourage use of `SpawnOptionsBuilder`.
+- **Status**: Resolved in `v0.2.0-preview.1`
+- **Change**: All fields are now private. `SpawnOptions::builder(...)` is the supported construction path.
 
-### `Fd::read` and `Fd::write`
-- **Current**: Public methods taking raw pointers.
-- **Issue**: Encourages unsafe usage at the OS boundary.
-- **Proposal**: Provide slice-based safe alternatives (e.g., `read(&mut [u8])`). Consider making the raw pointer versions `unsafe` or `pub(crate)`.
+### `Fd` raw-pointer read/write
+- **Status**: Resolved in `v0.2.0-preview.1`
+- **Change**: Public callers now use `Fd::read_slice` and `Fd::write_slice`; raw-pointer methods are no longer public API.
+
+## 3. Remaining Open Issues
+
+### `close_range_fast` Android syscall number
+- **Status**: Open
+- **Issue**: Android `close_range` still uses a hardcoded syscall number rather than a clearly documented per-arch constant path.
+
+### Linux/Android module portability boundaries
+- **Status**: Open
+- **Issue**: `reactor` and `inotify` are target-specific APIs but the crate does not enforce those boundaries as clearly as it should at the module surface.
+
+### Process-global shutdown helper semantics
+- **Status**: Open
+- **Issue**: `install_shutdown_flag` is deliberately process-global and improved, but it still deserves careful consumption and stronger long-term integration coverage.

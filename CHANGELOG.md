@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardened `sys::install_shutdown_flag` installation order and rollback semantics.
 - Documented shutdown handler failure behavior and process-global semantics.
 
+## [0.2.0-preview.1]
+
+### Changed
+- Replaced public raw-pointer `Fd` read/write API with safe slice-based `read_slice`/`write_slice`.
+- Made `SpawnOptions` fields private; builder is now the construction path.
+- Hid `ExecContext` and `ExecArgv` from public API.
+- Hid `FdSlot` from public API.
+- Simplified `DrainState` public completion API.
+
+### Added
+- `Fd::read_slice`
+- `Fd::write_slice`
+
 ## [0.1.3-preview.1]
 
 ### Added
