@@ -649,19 +649,7 @@ pub fn spawn(opts: SpawnOptions) -> Result<Output, SysError> {
     let pid = running.process.pid();
     let mut drain = running.drain;
 
-    // To prevent FD leak and adhere to ownership, we shouldn't use `mem::forget`.
-    if let Some(mut slot) = drain.stdin_slot.take() {
-        slot.token = Some(reactor.add(&slot.fd, false, true)?);
-        drain.stdin_slot = Some(slot);
-    }
-    if let Some(mut slot) = drain.stdout_slot.take() {
-        slot.token = Some(reactor.add(&slot.fd, true, false)?);
-        drain.stdout_slot = Some(slot);
-    }
-    if let Some(mut slot) = drain.stderr_slot.take() {
-        slot.token = Some(reactor.add(&slot.fd, true, false)?);
-        drain.stderr_slot = Some(slot);
-    }
+    drain.register_with_reactor(&mut reactor)?;
 
     if !wait {
         let (stdout, stderr) = drain.into_parts();
@@ -1173,44 +1161,23 @@ fn wait_loop(
         let nevents = reactor.wait(&mut events, 64, timeout)?;
 
         for ev in events.iter().take(nevents) {
-            let fd_token = Some(ev.token);
-
-            if drain
-                .stdout_slot
-                .as_ref()
-                .is_some_and(|s| s.token == fd_token)
-            {
+            if drain.stdout_matches(ev.token) {
                 if ev.readable {
-                    let _ = drain.read_fd(true)?;
-                } else if ev.error
-                    && let Some(slot) = drain.stdout_slot.take()
-                {
-                    reactor.del(&slot.fd);
-                }
-            } else if drain
-                .stderr_slot
-                .as_ref()
-                .is_some_and(|s| s.token == fd_token)
-            {
-                if ev.readable {
-                    let _ = drain.read_fd(false)?;
-                } else if ev.error
-                    && let Some(slot) = drain.stderr_slot.take()
-                {
-                    reactor.del(&slot.fd);
-                }
-            } else if drain
-                .stdin_slot
-                .as_ref()
-                .is_some_and(|s| s.token == fd_token)
-            {
-                if ev.writable {
-                    let _ = drain.write_stdin()?;
+                    drain.handle_stdout_ready(&mut reactor)?;
                 } else if ev.error {
-                    if let Some(slot) = drain.stdin_slot.take() {
-                        reactor.del(&slot.fd);
-                    }
-                    drain.writer.buf = None;
+                    drain.drop_stdout(&mut reactor);
+                }
+            } else if drain.stderr_matches(ev.token) {
+                if ev.readable {
+                    drain.handle_stderr_ready(&mut reactor)?;
+                } else if ev.error {
+                    drain.drop_stderr(&mut reactor);
+                }
+            } else if drain.stdin_matches(ev.token) {
+                if ev.writable {
+                    drain.handle_stdin_writable(&mut reactor)?;
+                } else if ev.error {
+                    drain.drop_stdin(&mut reactor);
                 }
             }
         }

@@ -14,7 +14,7 @@ use crate::reactor::{Fd, Token};
 use crate::spawn::SysError;
 
 /// Associates a file descriptor with an optional reactor token.
-pub struct FdSlot {
+pub(crate) struct FdSlot {
     /// Token assigned by the reactor for this descriptor.
     pub token: Option<Token>,
     /// The managed file descriptor.
@@ -119,24 +119,24 @@ where
 
     /// Perform a non-blocking write to stdin if pending.
     #[inline(always)]
-    pub fn write_stdin(&mut self) -> Result<Option<FdSlot>, SysError> {
+    pub fn write_stdin(&mut self) -> Result<bool, SysError> {
         let fd = if let Some(s) = &self.stdin_slot {
             &s.fd
         } else {
-            return Ok(None);
+            return Ok(true);
         };
 
         let done = self.writer.write_to_fd(fd)?;
         if done {
-            let slot = self.stdin_slot.take();
-            return Ok(slot);
+            self.stdin_slot.take();
+            return Ok(true);
         }
-        Ok(None)
+        Ok(false)
     }
 
     /// Perform a non-blocking read from stdout or stderr.
     #[inline(always)]
-    pub fn read_fd(&mut self, is_stdout: bool) -> Result<Option<FdSlot>, SysError> {
+    pub fn read_fd(&mut self, is_stdout: bool) -> Result<bool, SysError> {
         let eof = {
             let slot = if is_stdout {
                 &self.stdout_slot
@@ -146,7 +146,7 @@ where
             let fd = if let Some(s) = slot {
                 &s.fd
             } else {
-                return Ok(None);
+                return Ok(true);
             };
             self.buffer
                 .read_from_fd(fd, is_stdout, &mut self.early_exit)?
@@ -154,19 +154,19 @@ where
 
         if eof {
             if is_stdout {
-                let slot = self.stdout_slot.take();
-                return Ok(slot);
+                self.stdout_slot.take();
+                return Ok(true);
             } else {
-                let slot = self.stderr_slot.take();
-                return Ok(slot);
+                self.stderr_slot.take();
+                return Ok(true);
             }
         }
 
-        Ok(None)
+        Ok(false)
     }
 
     /// Extract all active slots for cleanup or reactor removal.
-    pub fn take_all_slots(&mut self) -> Vec<FdSlot> {
+    pub(crate) fn take_all_slots(&mut self) -> Vec<FdSlot> {
         let mut slots = Vec::new();
         if let Some(slot) = self.stdin_slot.take() {
             slots.push(slot);
@@ -178,6 +178,105 @@ where
             slots.push(slot);
         }
         slots
+    }
+
+    pub(crate) fn register_with_reactor(
+        &mut self,
+        reactor: &mut crate::reactor::Reactor,
+    ) -> Result<(), SysError> {
+        if let Some(mut slot) = self.stdin_slot.take() {
+            slot.token = Some(reactor.add(&slot.fd, false, true)?);
+            self.stdin_slot = Some(slot);
+        }
+        if let Some(mut slot) = self.stdout_slot.take() {
+            slot.token = Some(reactor.add(&slot.fd, true, false)?);
+            self.stdout_slot = Some(slot);
+        }
+        if let Some(mut slot) = self.stderr_slot.take() {
+            slot.token = Some(reactor.add(&slot.fd, true, false)?);
+            self.stderr_slot = Some(slot);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn stdout_matches(&self, token: Token) -> bool {
+        self.stdout_slot
+            .as_ref()
+            .is_some_and(|slot| slot.token == Some(token))
+    }
+
+    pub(crate) fn stderr_matches(&self, token: Token) -> bool {
+        self.stderr_slot
+            .as_ref()
+            .is_some_and(|slot| slot.token == Some(token))
+    }
+
+    pub(crate) fn stdin_matches(&self, token: Token) -> bool {
+        self.stdin_slot
+            .as_ref()
+            .is_some_and(|slot| slot.token == Some(token))
+    }
+
+    pub(crate) fn drop_stdout(&mut self, reactor: &mut crate::reactor::Reactor) {
+        if let Some(slot) = self.stdout_slot.take() {
+            reactor.del(&slot.fd);
+        }
+    }
+
+    pub(crate) fn drop_stderr(&mut self, reactor: &mut crate::reactor::Reactor) {
+        if let Some(slot) = self.stderr_slot.take() {
+            reactor.del(&slot.fd);
+        }
+    }
+
+    pub(crate) fn drop_stdin(&mut self, reactor: &mut crate::reactor::Reactor) {
+        if let Some(slot) = self.stdin_slot.take() {
+            reactor.del(&slot.fd);
+        }
+        self.writer.buf = None;
+    }
+
+    pub(crate) fn handle_stdout_ready(
+        &mut self,
+        reactor: &mut crate::reactor::Reactor,
+    ) -> Result<(), SysError> {
+        if let Some(slot) = &self.stdout_slot {
+            let eof = self
+                .buffer
+                .read_from_fd(&slot.fd, true, &mut self.early_exit)?;
+            if eof {
+                self.drop_stdout(reactor);
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn handle_stderr_ready(
+        &mut self,
+        reactor: &mut crate::reactor::Reactor,
+    ) -> Result<(), SysError> {
+        if let Some(slot) = &self.stderr_slot {
+            let eof = self
+                .buffer
+                .read_from_fd(&slot.fd, false, &mut self.early_exit)?;
+            if eof {
+                self.drop_stderr(reactor);
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn handle_stdin_writable(
+        &mut self,
+        reactor: &mut crate::reactor::Reactor,
+    ) -> Result<(), SysError> {
+        if let Some(slot) = &self.stdin_slot {
+            let done = self.writer.write_to_fd(&slot.fd)?;
+            if done {
+                self.drop_stdin(reactor);
+            }
+        }
+        Ok(())
     }
 
     /// Consume the state and return (stdout, stderr) buffers.
