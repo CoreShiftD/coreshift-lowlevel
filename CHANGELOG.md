@@ -8,7 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.2-preview.1]
 
 ### Added
-- Added `sys::path_uid` and `sys::proc_uid` helpers for cheap ownership checks.
+- Added `sys::path_uid` helper for cheap ownership checks.
+- Added `sys::proc_uid` helper for cheap ownership checks.
 
 ## [0.1.1-preview.1]
 
