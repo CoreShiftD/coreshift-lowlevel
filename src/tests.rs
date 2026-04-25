@@ -7,7 +7,7 @@ use crate::reactor::{Fd, Reactor};
 use crate::spawn::{Process, SpawnOptions, spawn_start};
 use crate::sys::{
     CancelPolicy, ExecContext, ProcessGroup, parse_proc_status, path_exists, path_lstat_exists,
-    readahead,
+    path_uid, proc_uid, readahead,
 };
 use std::fs::{File, remove_file};
 use std::io::Write;
@@ -225,6 +225,50 @@ fn test_path_existence() {
     std::fs::remove_file(&temp_file).unwrap();
     assert!(!path_exists(path_str));
     assert!(!path_lstat_exists(path_str));
+}
+
+#[test]
+fn test_path_uid_temp_file() {
+    let path = std::env::temp_dir().join(format!(
+        "coreshift_test_uid_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::write(&path, b"uid").unwrap();
+
+    let uid = path_uid(&path).unwrap();
+    assert_eq!(uid, unsafe { libc::geteuid() });
+
+    remove_file(&path).unwrap();
+}
+
+#[test]
+fn test_proc_uid_current_process() {
+    let uid = proc_uid(std::process::id() as i32).unwrap();
+    assert_eq!(uid, unsafe { libc::geteuid() });
+}
+
+#[test]
+fn test_proc_uid_invalid_pid_returns_error() {
+    let err = proc_uid(999_999).unwrap_err();
+    assert_eq!(err.raw_os_error(), Some(libc::ENOENT));
+}
+
+#[test]
+fn test_path_uid_missing_path_returns_error() {
+    let path = std::env::temp_dir().join(format!(
+        "coreshift_missing_uid_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let err = path_uid(&path).unwrap_err();
+    assert_eq!(err.raw_os_error(), Some(libc::ENOENT));
 }
 
 #[test]

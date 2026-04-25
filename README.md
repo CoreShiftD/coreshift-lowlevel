@@ -10,7 +10,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-coreshift-lowlevel = { git = "https://github.com/CoreShiftD/coreshift-lowlevel", tag = "v0.1.1-preview.1" }
+coreshift-lowlevel = { git = "https://github.com/CoreShiftD/coreshift-lowlevel", tag = "v0.1.2-preview.1" }
 ```
 
 ## Features
@@ -29,6 +29,9 @@ Type-safe interaction with the Linux `inotify` subsystem. Supports draining pack
 
 ### System Probes
 Safe wrappers for `procfs` metadata, including process status, command lines, and system clock information.
+
+### Proc Ownership Helpers
+Cheap ownership probes for filesystem paths and `/proc/<pid>` entries, useful before reading procfs files in policy code.
 
 ## Quick Start
 

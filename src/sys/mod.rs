@@ -18,7 +18,10 @@
 
 use crate::spawn::{SysError, syscall_ret};
 use libc::sigset_t;
+use std::ffi::CString;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::AsRawFd;
+use std::path::Path;
 
 /// Probe whether a filesystem path is accessible and exists.
 ///
@@ -53,6 +56,35 @@ pub fn path_lstat_exists(path: &str) -> bool {
 /// OS boundary layer where blocking I/O on pseudo-files is acceptable.
 pub fn read_to_string(path: &str) -> Result<String, std::io::Error> {
     std::fs::read_to_string(path)
+}
+
+/// Return the owning UID for a filesystem path.
+///
+/// This performs a `stat(2)` call and returns the owner UID from the resulting
+/// metadata. Failures such as missing paths, permission errors, or invalid path
+/// bytes are surfaced as [`SysError`].
+pub fn path_uid(path: impl AsRef<Path>) -> Result<u32, SysError> {
+    stat_uid(path.as_ref(), "stat")
+}
+
+/// Return the owning UID for `/proc/<pid>`.
+///
+/// This is a cheap ownership probe that can be useful before reading procfs
+/// files such as `/proc/<pid>/cmdline` in hot paths. The process may disappear
+/// at any time, so callers must handle `NotFound` / `ENOENT` as a normal race.
+pub fn proc_uid(pid: i32) -> Result<u32, SysError> {
+    let path = format!("/proc/{pid}");
+    stat_uid(Path::new(&path), "stat")
+}
+
+fn stat_uid(path: &Path, op: &'static str) -> Result<u32, SysError> {
+    let path =
+        CString::new(path.as_os_str().as_bytes()).map_err(|_| SysError::sys(libc::EINVAL, op))?;
+    let mut stat_buf: libc::stat = unsafe { std::mem::zeroed() };
+    let ret = unsafe { libc::stat(path.as_ptr(), &mut stat_buf) };
+
+    syscall_ret(ret, op)?;
+    Ok(stat_buf.st_uid)
 }
 
 /// Advise the kernel to begin reading file data into the page cache.
@@ -230,7 +262,6 @@ impl SignalRuntime {
 }
 use libc::{c_char, pid_t};
 use serde::{Deserialize, Serialize};
-use std::ffi::CString;
 use std::ptr;
 
 /// Policy for handling process cancellation or timeouts.
