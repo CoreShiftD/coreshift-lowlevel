@@ -76,7 +76,7 @@ pub fn read_events(fd: &Fd) -> Result<Vec<InotifyEvent>, SysError> {
     let mut buf = vec![0u8; 4096];
 
     loop {
-        match fd.read(buf.as_mut_ptr(), buf.len()) {
+        match fd.read_slice(&mut buf) {
             Ok(Some(0)) => break,
             Ok(Some(n)) => {
                 all_events.extend(decode_events(&buf[..n]));

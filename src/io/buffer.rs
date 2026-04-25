@@ -60,7 +60,7 @@ impl BufferState {
             if remaining_limit == 0 {
                 // Limit reached, just discard data.
                 let mut drop_buf = [0u8; 8192];
-                match fd.read(drop_buf.as_mut_ptr(), drop_buf.len()) {
+                match fd.read_slice(&mut drop_buf) {
                     Ok(Some(n)) if n > 0 => continue,
                     Ok(Some(_)) => {
                         return Ok(true); // EOF
@@ -79,7 +79,7 @@ impl BufferState {
             let to_read = remaining_limit.min(READ_CHUNK);
             dest.resize(len + to_read, 0);
 
-            match fd.read(dest[len..].as_mut_ptr(), to_read) {
+            match fd.read_slice(&mut dest[len..len + to_read]) {
                 Ok(Some(n)) if n > 0 => {
                     dest.truncate(len + n);
 

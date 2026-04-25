@@ -188,6 +188,23 @@ fn test_reactor_wait_zero_events() {
 }
 
 #[test]
+fn test_fd_slice_io_helpers() {
+    let mut fds = [0; 2];
+    unsafe { libc::pipe(fds.as_mut_ptr()) };
+    let r = Fd::new(fds[0], "pipe").unwrap();
+    let w = Fd::new(fds[1], "pipe").unwrap();
+
+    let input = b"hello";
+    let written = w.write_slice(input).unwrap().unwrap();
+    assert_eq!(written, input.len());
+
+    let mut buf = [0u8; 8];
+    let read = r.read_slice(&mut buf).unwrap().unwrap();
+    assert_eq!(read, input.len());
+    assert_eq!(&buf[..read], input);
+}
+
+#[test]
 fn test_writer_state_epipe() {
     use crate::io::writer::WriterState;
 

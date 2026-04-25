@@ -36,7 +36,7 @@ impl WriterState {
                 let remaining = buf.len() - self.off;
                 let chunk = remaining.min(WRITE_CHUNK);
 
-                match fd.write(buf[self.off..].as_ptr(), chunk) {
+                match fd.write_slice(&buf[self.off..self.off + chunk]) {
                     Ok(Some(n)) if n > 0 => {
                         self.off += n;
                     }

@@ -84,15 +84,27 @@ impl Fd {
         syscall_ret(r, "fcntl(F_SETFD)")
     }
 
-    /// Read bytes into a raw buffer.
-    ///
-    /// ### Advanced API
-    /// This is a low-level wrapper around `libc::read`. The caller is
-    /// responsible for ensuring `buf` points to a valid memory region of at
-    /// least `count` bytes.
+    /// Read bytes into a mutable slice.
     ///
     /// Returns `Ok(None)` if the operation would block (`EAGAIN`).
-    pub fn read(&self, buf: *mut u8, count: usize) -> Result<Option<usize>, SysError> {
+    pub fn read_slice(&self, buf: &mut [u8]) -> Result<Option<usize>, SysError> {
+        self.read_raw(buf.as_mut_ptr(), buf.len())
+    }
+
+    /// Write bytes from a slice.
+    ///
+    /// Returns `Ok(None)` if the operation would block (`EAGAIN`).
+    pub fn write_slice(&self, buf: &[u8]) -> Result<Option<usize>, SysError> {
+        self.write_raw(buf.as_ptr(), buf.len())
+    }
+
+    /// Read bytes into a raw buffer.
+    ///
+    /// Internal callers must ensure `buf` points to a valid writable region of
+    /// at least `count` bytes.
+    ///
+    /// Returns `Ok(None)` if the operation would block (`EAGAIN`).
+    pub(crate) fn read_raw(&self, buf: *mut u8, count: usize) -> Result<Option<usize>, SysError> {
         loop {
             let n = unsafe { libc::read(self.0, buf as *mut libc::c_void, count) };
             if n < 0 {
@@ -111,13 +123,15 @@ impl Fd {
 
     /// Write bytes from a raw buffer.
     ///
-    /// ### Advanced API
-    /// This is a low-level wrapper around `libc::write`. The caller is
-    /// responsible for ensuring `buf` points to a valid memory region of at
-    /// least `count` bytes.
+    /// Internal callers must ensure `buf` points to a valid readable region of
+    /// at least `count` bytes.
     ///
     /// Returns `Ok(None)` if the operation would block (`EAGAIN`).
-    pub fn write(&self, buf: *const u8, count: usize) -> Result<Option<usize>, SysError> {
+    pub(crate) fn write_raw(
+        &self,
+        buf: *const u8,
+        count: usize,
+    ) -> Result<Option<usize>, SysError> {
         loop {
             let n = unsafe { libc::write(self.0, buf as *const libc::c_void, count) };
             if n < 0 {
@@ -281,7 +295,7 @@ impl Reactor {
         if let Some(fd) = &self.signalfd {
             let mut buf = [0u8; std::mem::size_of::<libc::signalfd_siginfo>()];
             loop {
-                match fd.read(buf.as_mut_ptr(), buf.len()) {
+                match fd.read_slice(&mut buf) {
                     Ok(Some(n)) if n < buf.len() => break,
                     Ok(Some(_)) => continue,
                     Ok(None) => break,
